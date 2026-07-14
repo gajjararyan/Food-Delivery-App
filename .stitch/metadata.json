@@ -1,0 +1,46 @@
+{
+  "projectId": "11845391070777637560",
+  "projectTitle": "GharKaSwad Marketplace",
+  "designSystem": "Artisanal Kitchen",
+  "customColor": "#d96b41",
+  "fonts": {
+    "headline": "Literata",
+    "body": "Plus Jakarta Sans"
+  },
+  "screensReferencedInStep1": [
+    "Onboarding - Welcome",
+    "Customer - Login & OTP Verification",
+    "Home - Discover Meals",
+    "Chef Profile - Nani Geeta",
+    "Custom Thali Builder",
+    "Cart & Checkout",
+    "Live Order Tracking",
+    "Customer - Empty States Gallery",
+    "Customer - Payment Failed",
+    "Dietary Preferences",
+    "Become a Home Chef"
+  ],
+  "screensReferencedInStep4": [
+    {
+      "title": "Home - Discover Meals",
+      "id": "141670c510c74ddfadc9572550dde0a5",
+      "html": ".stitch/designs/discover-meals.html"
+    },
+    {
+      "title": "Chef Profile - Nani Geeta",
+      "id": "86568fe3bbc94603a0dff4508c3ce67c",
+      "html": ".stitch/designs/chef-profile.html"
+    },
+    {
+      "title": "Custom Thali Builder",
+      "id": "d760e58f344748f9805b169f5052446e",
+      "html": ".stitch/designs/thali-builder.html"
+    },
+    {
+      "title": "Cart & Checkout",
+      "id": "2ecaea67342846b0a5723536b5730d79",
+      "html": ".stitch/designs/cart-checkout.html",
+      "note": "Cart step only in Step 4; payment in Step 5"
+    }
+  ]
+}
