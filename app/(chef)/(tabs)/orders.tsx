@@ -20,6 +20,7 @@ export default function ChefOrdersScreen() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [busyId, setBusyId] = useState<Uuid | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const makerQuery = useQuery({
     queryKey: ['chef-maker', user?.phone],
@@ -75,10 +76,18 @@ export default function ChefOrdersScreen() {
     (o) => o.status === 'delivered' || o.status === 'cancelled' || o.status === 'payment_failed',
   );
 
-  const run = async (orderId: Uuid, action: () => Promise<unknown>) => {
+  const run = async (
+    orderId: Uuid,
+    action: () => Promise<{ ok: boolean; error?: { message: string } }>,
+  ) => {
     setBusyId(orderId);
+    setActionError(null);
     try {
-      await action();
+      const result = await action();
+      if (!result.ok) {
+        setActionError(result.error?.message ?? 'Could not update order');
+        return;
+      }
       refresh();
     } finally {
       setBusyId(null);
@@ -90,8 +99,10 @@ export default function ChefOrdersScreen() {
       <Text style={styles.title}>Incoming orders</Text>
       <Text style={styles.sub}>
         Accept new orders, prepare the meal, then mark ready for pickup (takeaway) or hand off for
-        delivery. Completed orders stay here for reference — with no further actions.
+        delivery. For takeaway, confirm the customer PIN before completing. Declining a paid order
+        credits the customer wallet.
       </Text>
+      {actionError ? <Text style={styles.error}>{actionError}</Text> : null}
 
       {orders.length === 0 ? (
         <EmptyState
@@ -128,8 +139,10 @@ export default function ChefOrdersScreen() {
                   key={order.id}
                   order={order}
                   busy={busyId === order.id}
-                  onAdvance={() =>
-                    run(order.id, () => advanceMakerOrderStatus(order.id, maker.id))
+                  onAdvance={(opts) =>
+                    run(order.id, () =>
+                      advanceMakerOrderStatus(order.id, maker.id, opts),
+                    )
                   }
                 />
               ))}
@@ -160,6 +173,7 @@ const styles = StyleSheet.create({
   },
   title: { ...typography.headlineMd, color: colors.onBackground },
   sub: { ...typography.bodyMd, color: colors.onSurfaceVariant, marginBottom: spacing.sm },
+  error: { ...typography.bodySm, color: colors.error, marginBottom: spacing.sm },
   section: { gap: spacing.sm },
   sectionTitle: { ...typography.labelMd, color: colors.onSurface },
 });

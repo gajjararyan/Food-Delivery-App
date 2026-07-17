@@ -28,6 +28,19 @@ export function isTakeawayOrder(
   return orderFulfillmentMode(order) === 'takeaway';
 }
 
+/**
+ * Pickup PIN is only revealed after the cook accepts.
+ * Hidden while waiting (`placed`) so a declined order never exposed the code.
+ */
+export function shouldRevealPickupPin(status: OrderStatus): boolean {
+  return (
+    status === 'accepted' ||
+    status === 'cooking' ||
+    status === 'out_for_delivery' ||
+    status === 'delivered'
+  );
+}
+
 export function orderStatusLabel(
   status: OrderStatus,
   fulfillment: FulfillmentMode = 'delivery',

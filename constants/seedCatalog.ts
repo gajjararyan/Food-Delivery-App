@@ -22,11 +22,15 @@ export const SEED_MAKER: MakerProfile = {
   kitchen_name: "Nani Geeta's Kitchen",
   bio: 'Traditional Gujarati recipes, cooked fresh each morning. Jain-friendly swaps available on every thali.',
   photo_url: null,
+  kitchen_address: 'Bandra West, Mumbai',
+  lat: 19.0596,
+  lng: 72.8295,
   tier: 'verified',
   cuisine_tags: ['Gujarati', 'Home-style', 'Vegetarian'],
   rating_avg: 4.9,
   rating_count: 128,
   is_active: true,
+  is_open: true,
   created_at: now,
 };
 

@@ -1,14 +1,22 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { CartLine, Order, OrderStatus, Uuid } from '../types';
-import { calculateCartTotals } from '../delivery';
-import { nextOrderStatus, ORDER_STATUS_FLOW } from '../orderStatus';
+import { calculateCartTotals, isWithinDeliveryRadius } from '../delivery';
+import { DELIVERY_PRICING } from '../../constants/delivery';
+import { nextOrderStatus, ORDER_STATUS_FLOW, isTakeawayOrder } from '../orderStatus';
 import { err, ok, type Result } from '../result';
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { logger } from '../logger';
 import { applyCreditsAtCheckout } from '../credits';
 import { calculateThaliPrice } from '../pricing';
-import { getCreditBalance } from './credits';
+import { getCreditBalance, grantCredit } from './credits';
+import { hasKitchenPin } from '../marketplace/kitchenStatus';
 import { getMakerById } from '../marketplace/localStore';
+import { SEED_MAKER } from '../../constants/seedCatalog';
+import { SEED } from '../../constants/seed';
+import { isLiveRazorpayPaymentId } from '../payment/apiAuth';
+import { getApiBaseUrl } from './apiBase';
+import { estimateTravel } from '../maps/distanceEstimate';
+import { fetchCommunityMaker } from './chefs';
 
 const ORDERS_STORAGE_KEY = 'gharkaswad_orders_v1';
 const MEMORY_ORDERS = new Map<string, Order>();
@@ -171,8 +179,53 @@ export async function createOrderFromCart(params: {
     }
   }
 
-  const maker = await getMakerById(line.makerId);
+  const makerResult = await fetchCommunityMaker(line.makerId);
+  const maker =
+    (makerResult.ok ? makerResult.data : null) ??
+    (await getMakerById(line.makerId)) ??
+    (line.makerId === SEED.makerId ? SEED_MAKER : null);
+  if (!hasKitchenPin(maker)) {
+    return err(
+      'VALIDATION',
+      'This kitchen has not set a map pin yet. Ask them to add their location in the chef Menu before you can order.',
+    );
+  }
+
+  if (line.fulfillmentMode === 'delivery') {
+    if (line.customerLat == null || line.customerLng == null) {
+      return err('VALIDATION', 'Choose a delivery address within the kitchen’s service area.');
+    }
+    const travel = estimateTravel(
+      { lat: maker!.lat!, lng: maker!.lng! },
+      { lat: line.customerLat, lng: line.customerLng },
+    );
+    if (!isWithinDeliveryRadius(travel.km)) {
+      return err(
+        'VALIDATION',
+        `This address is ~${travel.km} km away. Delivery is only within ${DELIVERY_PRICING.maxServiceDistanceKm} km of the kitchen — choose a nearer pin or takeaway.`,
+      );
+    }
+    if (!cartTotals.deliveryAvailable) {
+      return err(
+        'VALIDATION',
+        `Delivery is only within ${DELIVERY_PRICING.maxServiceDistanceKm} km of the kitchen. Try a nearer address or takeaway.`,
+      );
+    }
+  }
+
   const trimmedName = customerName?.trim() || null;
+
+  const isTakeaway = line.fulfillmentMode === 'takeaway';
+  const pickupPin = isTakeaway
+    ? String(Math.floor(Math.random() * 10000)).padStart(4, '0')
+    : null;
+
+  const pointLat = isTakeaway
+    ? (line.pickupLat ?? line.customerLat ?? null)
+    : (line.customerLat ?? null);
+  const pointLng = isTakeaway
+    ? (line.pickupLng ?? line.customerLng ?? null)
+    : (line.customerLng ?? null);
 
   const thali_snapshot = {
     menuName: line.menuName,
@@ -195,10 +248,12 @@ export async function createOrderFromCart(params: {
     customerName: trimmedName,
     cookingInstructions: line.cookingInstructions?.trim() || null,
     swapCreditsApplied: line.swapCreditsApplied,
+    pickupIsSelf: isTakeaway ? (line.pickupIsSelf ?? true) : undefined,
+    pickupContactName: isTakeaway ? line.pickupContactName?.trim() || null : undefined,
+    // For takeaway these are the pickup-person starting point; for delivery the drop-off.
+    customerLat: pointLat,
+    customerLng: pointLng,
   };
-  console.log("========== THALI SNAPSHOT ==========");  
-  console.log(JSON.stringify(thali_snapshot, null, 2));
-  console.log("========== END THALI SNAPSHOT ==========");
 
   const meal_slot = line.mealSlot;
   const now = new Date().toISOString();
@@ -219,6 +274,7 @@ export async function createOrderFromCart(params: {
       total,
       razorpay_order_id: null,
       razorpay_payment_id: null,
+      pickup_pin: pickupPin,
       thali_snapshot,
       created_at: now,
       updated_at: now,
@@ -240,11 +296,9 @@ export async function createOrderFromCart(params: {
     credits_applied: creditsApplied,
     total,
     thali_snapshot,
+    pickup_pin: pickupPin,
   };
-  
-  console.log("========== PAYLOAD ==========");
-  console.log(JSON.stringify(payload, null, 2));
-  
+
   const { data, error } = await supabase.rpc('place_order', {
     payload,
   });
@@ -313,7 +367,11 @@ export async function listOrdersForMaker(makerId: Uuid): Promise<Result<Order[]>
   return ok(((data ?? []) as Order[]).map(normalizeOrder));
 }
 
-export async function advanceMakerOrderStatus(orderId: Uuid, makerId: Uuid): Promise<Result<Order>> {
+export async function advanceMakerOrderStatus(
+  orderId: Uuid,
+  makerId: Uuid,
+  opts?: { pickupPin?: string },
+): Promise<Result<Order>> {
   await hydrateOrders();
 
   const current = await getOrder(orderId);
@@ -322,6 +380,24 @@ export async function advanceMakerOrderStatus(orderId: Uuid, makerId: Uuid): Pro
 
   const nextStatus = nextOrderStatus(current.data.status);
   if (!nextStatus) return ok(current.data);
+
+  // Takeaway handoff: require customer PIN when marking picked up.
+  if (
+    isTakeawayOrder(current.data) &&
+    current.data.status === 'out_for_delivery' &&
+    nextStatus === 'delivered'
+  ) {
+    const expected = current.data.pickup_pin?.trim();
+    const given = opts?.pickupPin?.trim() ?? '';
+    if (expected) {
+      if (!given) {
+        return err('VALIDATION', 'Enter the customer pickup PIN to complete handoff');
+      }
+      if (given !== expected) {
+        return err('VALIDATION', 'Pickup PIN does not match');
+      }
+    }
+  }
 
   if (!isSupabaseConfigured) {
     const next = {
@@ -352,7 +428,7 @@ export async function acceptMakerOrder(orderId: Uuid, makerId: Uuid): Promise<Re
   return rpcSetOrderStatus(orderId, 'accepted', makerId);
 }
 
-/** Cook declines a newly placed order → cancelled. */
+/** Cook declines a newly placed order → cancelled + Razorpay/wallet refund. */
 export async function rejectMakerOrder(orderId: Uuid, makerId: Uuid): Promise<Result<Order>> {
   await hydrateOrders();
   const current = await getOrder(orderId);
@@ -362,7 +438,11 @@ export async function rejectMakerOrder(orderId: Uuid, makerId: Uuid): Promise<Re
     return err('VALIDATION', 'Only new orders can be declined');
   }
 
-  if (!isSupabaseConfigured) {
+  const cashPaid = Math.round(Number(current.data.total) * 100) / 100;
+  const creditsApplied = Math.round(Number(current.data.credits_applied) * 100) / 100;
+  const refundAmount = Math.round((cashPaid + creditsApplied) * 100) / 100;
+
+  const cancelLocal = () => {
     const next = {
       ...current.data,
       status: 'cancelled' as const,
@@ -370,9 +450,54 @@ export async function rejectMakerOrder(orderId: Uuid, makerId: Uuid): Promise<Re
     };
     remember(next);
     return ok(next);
+  };
+
+  let cancelled: Result<Order>;
+  if (!isSupabaseConfigured) {
+    cancelled = cancelLocal();
+  } else {
+    cancelled = await rpcSetOrderStatus(orderId, 'cancelled', makerId);
+  }
+  if (!cancelled.ok) return cancelled;
+
+  if (refundAmount <= 0) return cancelled;
+
+  // Prefer payment API (live Razorpay refund + selective wallet restore).
+  const apiBase = getApiBaseUrl();
+  if (apiBase && isSupabaseConfigured) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token ?? null;
+    if (accessToken) {
+      const { refundDeclinedOrder } = await import('./payments');
+      const refunded = await refundDeclinedOrder({
+        orderId,
+        makerId,
+        accessTokenOverride: accessToken,
+      });
+      if (refunded.ok) return cancelled;
+      logger.error('rejectMakerOrder API refund failed', refunded.error);
+      // Fall through to wallet credit so the diner is not left empty-handed.
+    }
   }
 
-  return rpcSetOrderStatus(orderId, 'cancelled', makerId);
+  // Offline / sandbox / API down: wallet credit.
+  // If a live Razorpay capture exists, only restore credits_applied here —
+  // cash should come from /payments/refund-declined-order (retry that, don't double-pay).
+  const livePay = isLiveRazorpayPaymentId(current.data.razorpay_payment_id);
+  const walletAmount = livePay ? creditsApplied : refundAmount;
+  if (walletAmount > 0) {
+    const credit = await grantCredit({
+      customerId: current.data.customer_id,
+      amount: walletAmount,
+      reason: `Kitchen declined order ${orderId.slice(0, 8)} — credited to wallet`,
+      orderId,
+    });
+    if (!credit.ok) {
+      logger.error('rejectMakerOrder credit grant failed', credit.error);
+    }
+  }
+
+  return cancelled;
 }
 
 export async function getOrder(orderId: Uuid, customerId?: Uuid): Promise<Result<Order>> {

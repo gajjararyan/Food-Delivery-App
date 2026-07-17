@@ -50,7 +50,7 @@ export default function AdminApplicationsScreen() {
       <Text style={styles.brand}>GharKaSwad Ops</Text>
       <Text style={styles.title}>Chef applications</Text>
       <Text style={styles.sub}>
-        Approve a kitchen to publish it on Discover with a starter customizable thali.
+        Approve publishes the kitchen on Discover (closed until the chef sets a kitchen map pin).
       </Text>
       <Text style={styles.counts}>
         {pending.length} pending · {needsRetry.length} need retry · {decided.length} decided ·{' '}

@@ -20,7 +20,7 @@ import {
 import { listOrdersForMaker } from '../../../lib/api/orders';
 import { formatInr } from '../../../lib/date';
 import { invalidateMarketplaceQueries } from '../../../lib/marketplace/invalidation';
-import { isKitchenOpen } from '../../../lib/marketplace/kitchenStatus';
+import { hasKitchenPin, isKitchenOpen } from '../../../lib/marketplace/kitchenStatus';
 
 function shouldShowBio(bio: string | null | undefined, cuisineTags: string[]): boolean {
   const trimmed = bio?.trim();
@@ -126,6 +126,13 @@ export default function ChefOverviewScreen() {
   const onToggleOpen = async (next: boolean) => {
     setSavingOpen(true);
     setStatusError(null);
+    if (next && !hasKitchenPin(maker)) {
+      setSavingOpen(false);
+      setStatusError(
+        'Set your kitchen map pin on the Menu tab before going live — otherwise customers get wrong distance and maps.',
+      );
+      return;
+    }
     const result = await saveMakerKitchen(maker.id, { is_open: next });
     setSavingOpen(false);
     if (!result.ok) {
@@ -150,6 +157,15 @@ export default function ChefOverviewScreen() {
 
       <KitchenStatusCard isOpen={kitchenOpen} saving={savingOpen} onToggle={onToggleOpen} />
       {statusError ? <Text style={styles.error}>{statusError}</Text> : null}
+      {!hasKitchenPin(maker) ? (
+        <Card style={styles.tipCard}>
+          <Text style={styles.tipTitle}>Map pin required</Text>
+          <Text style={styles.tipBody}>
+            Add your kitchen location on the Menu tab before going live. Without a pin, customers
+            cannot place orders and maps show the wrong place.
+          </Text>
+        </Card>
+      ) : null}
 
       <ChefStatsCard
         stats={[

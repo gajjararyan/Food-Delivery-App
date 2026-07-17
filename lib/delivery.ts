@@ -103,6 +103,7 @@ export function calculateDeliveryFeeBreakdown(params: {
 
   const platformFee = p.platformFee;
 
+  // Stepped delivery fee by distance band (home-kitchen freshness).
   let baseDeliveryFee: number;
   if (distanceKm <= 2) {
     baseDeliveryFee = 15;
@@ -110,14 +111,12 @@ export function calculateDeliveryFeeBreakdown(params: {
     baseDeliveryFee = 20;
   } else if (distanceKm <= 6) {
     baseDeliveryFee = itemTotal >= p.discountedDeliveryMinOrder ? 15 : 25;
-  } else if (distanceKm <= 8) {
-    baseDeliveryFee = 35;
   } else {
-    baseDeliveryFee = 50;
+    // 6–7 km outer band (hard cap is maxServiceDistanceKm).
+    baseDeliveryFee = 35;
   }
 
-  const longDistanceFee =
-    distanceKm > p.longDistanceThresholdKm ? p.longDistanceFee : 0;
+  const longDistanceFee = longDistanceSurcharge(distanceKm);
 
   const feesSubtotal = roundMoney(platformFee + baseDeliveryFee + longDistanceFee);
   const gstAmount = roundMoney((feesSubtotal * p.gstRatePercent) / 100);
@@ -130,7 +129,7 @@ export function calculateDeliveryFeeBreakdown(params: {
   if (longDistanceFee > 0) {
     lines.push({
       key: 'long_distance',
-      label: `Long distance (>${p.longDistanceThresholdKm} km)`,
+      label: longDistanceLabel(distanceKm),
       amount: longDistanceFee,
     });
   }
@@ -153,6 +152,22 @@ export function calculateDeliveryFeeBreakdown(params: {
     deliveryAvailable: true,
     unavailableReason: null,
   };
+}
+
+/** Long-distance surcharge: ₹15 after 4 km, ₹30 after 6 km (up to 7 km max). */
+export function longDistanceSurcharge(distanceKm: number): number {
+  const p = DELIVERY_PRICING;
+  if (distanceKm <= p.longDistanceThresholdKm) return 0;
+  if (distanceKm <= p.longDistanceFarThresholdKm) return p.longDistanceFee;
+  return p.longDistanceFarFee;
+}
+
+function longDistanceLabel(distanceKm: number): string {
+  const p = DELIVERY_PRICING;
+  if (distanceKm > p.longDistanceFarThresholdKm) {
+    return `Long distance (>${p.longDistanceFarThresholdKm} km)`;
+  }
+  return `Long distance (>${p.longDistanceThresholdKm} km)`;
 }
 
 function roundMoney(n: number): number {

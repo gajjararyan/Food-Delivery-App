@@ -40,6 +40,7 @@ export default function ChefMenuScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [kitchenName, setKitchenName] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [coverUrl, setCoverUrl] = useState('');
@@ -93,6 +94,7 @@ export default function ChefMenuScreen() {
 
     if (firstHydrate) {
       setKitchenName(maker.kitchen_name);
+      setDisplayName(maker.display_name);
       setBio(maker.bio ?? '');
       setPhotoUrl(maker.photo_url ?? '');
       setCoverUrl(maker.cover_url ?? '');
@@ -156,6 +158,7 @@ export default function ChefMenuScreen() {
     setMessage(null);
     setError(null);
     const kitchen = await saveMakerKitchen(maker.id, {
+      display_name: displayName.trim() || maker.display_name,
       kitchen_name: kitchenName.trim() || maker.kitchen_name,
       bio: bio.trim() || null,
       photo_url: photoUrl.trim() || null,
@@ -270,6 +273,16 @@ export default function ChefMenuScreen() {
         />
         <Input label="Kitchen name" value={kitchenName} onChangeText={setKitchenName} />
         <Input
+          label="Chef name (shown on public page)"
+          value={displayName}
+          onChangeText={setDisplayName}
+          placeholder="e.g. Dixit Solanki"
+        />
+        <Text style={styles.fieldHint}>
+          This name appears under your kitchen title for customers. Change it here, then tap Save
+          profile.
+        </Text>
+        <Input
           label="Story / bio"
           value={bio}
           onChangeText={setBio}
@@ -346,6 +359,11 @@ const styles = StyleSheet.create({
   section: { ...typography.labelMd, color: colors.primary },
   sectionHeading: { ...typography.headlineSm, color: colors.onBackground, marginTop: spacing.sm },
   sectionHint: { ...typography.bodySm, color: colors.onSurfaceVariant },
+  fieldHint: {
+    ...typography.bodySm,
+    color: colors.onSurfaceVariant,
+    marginTop: -spacing.sm,
+  },
   fieldLabel: { ...typography.labelSm, color: colors.onSurfaceVariant },
   slotRow: { flexDirection: 'row', gap: spacing.sm },
   slotChip: {

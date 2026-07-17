@@ -289,3 +289,55 @@ export async function syncOrderAfterVerifiedPayment(orderId: string): Promise<Re
   await clearPendingCheckoutProof(orderId);
   return ok(refreshed.data);
 }
+
+export type DeclineRefundResult = {
+  alreadyRefunded: boolean;
+  razorpayRefundId: string | null;
+  walletCredit: number;
+  method: string;
+};
+
+/**
+ * After chef declines: refund live Razorpay capture and/or restore wallet credits.
+ * Offline / no API → caller should grant wallet credit locally instead.
+ */
+export async function refundDeclinedOrder(params: {
+  orderId: string;
+  makerId: string;
+  accessTokenOverride?: string | null;
+}): Promise<Result<DeclineRefundResult>> {
+  const accessToken = params.accessTokenOverride ?? (await getAccessToken());
+  if (!accessToken) return err('AUTH', 'Sign in required');
+
+  if (useLocalPaymentPath(accessToken) || !apiUrl()) {
+    return err('PAYMENT', 'Use local wallet credit path');
+  }
+
+  try {
+    const response = await fetch(`${apiUrl()}/payments/refund-declined-order`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: params.orderId,
+        makerId: params.makerId,
+        accessToken,
+      }),
+    });
+    const body = (await response.json().catch(() => ({}))) as DeclineRefundResult & {
+      message?: string;
+      ok?: boolean;
+    };
+    if (!response.ok) {
+      return err('PAYMENT', body.message ?? 'Decline refund failed');
+    }
+    return ok({
+      alreadyRefunded: Boolean(body.alreadyRefunded),
+      razorpayRefundId: body.razorpayRefundId ?? null,
+      walletCredit: Number(body.walletCredit ?? 0),
+      method: String(body.method ?? 'wallet'),
+    });
+  } catch (cause) {
+    logger.error('refundDeclinedOrder failed', cause);
+    return err('NETWORK', 'Could not reach payment server for refund', cause);
+  }
+}

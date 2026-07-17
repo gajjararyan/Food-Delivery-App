@@ -4,6 +4,7 @@ import { isSupabaseConfigured, supabase } from '../supabase';
 import { logger } from '../logger';
 import { persistImageUrl } from '../images/uploadKitchenImage';
 import { toE164India } from '../phone';
+import { hasKitchenPin } from '../marketplace/kitchenStatus';
 import {
   addChefApplication,
   addMenuItem,
@@ -356,8 +357,11 @@ export async function retryKitchenActivation(
       maker = await approveChefApplication(applicationId);
     }
 
-    // Ensure we attempt publish with an active flag for Discover.
-    maker = await updateMakerProfile(maker.id, { is_active: true, is_open: true });
+    // Approve activates Discover listing; kitchen stays closed until a pin is set.
+    maker = await updateMakerProfile(maker.id, {
+      is_active: true,
+      is_open: hasKitchenPin(maker),
+    });
     const phone = await getPhoneForMaker(maker.id);
     const publish = await publishKitchenAfterApproval(maker, phone, applicationId);
     if (!publish.ok) return publish;
@@ -402,6 +406,12 @@ async function publishKitchenAfterApproval(
   const statusSynced = await syncApplicationStatusRemote(applicationId, 'accepted');
   if (!statusSynced.ok) return fail(statusSynced);
 
+  // Never leave kitchen "open" without a map pin (fees / tracking need it).
+  if (!hasKitchenPin(maker) && maker.is_open !== false) {
+    maker = await updateMakerProfile(maker.id, { is_open: false });
+    await syncMakerToSupabase(maker, phone);
+  }
+
   return ok(maker);
 }
 
@@ -422,8 +432,20 @@ export async function fetchCommunityMakers(): Promise<Result<MakerProfile[]>> {
 }
 
 export async function fetchCommunityMaker(param: string): Promise<Result<MakerProfile>> {
+  // Prefer live Supabase row so kitchen pin / open state match what the cook saved.
+  if (isSupabaseConfigured && /^[0-9a-f-]{36}$/i.test(param.trim())) {
+    const remote = await pullKitchenFromSupabase({ makerId: param.trim() });
+    if (remote) return ok(remote.maker);
+  }
+
   const maker = await resolveMakerParam(param);
   if (!maker) return err('NOT_FOUND', 'Kitchen not found');
+
+  if (isSupabaseConfigured) {
+    const remote = await pullKitchenFromSupabase({ makerId: maker.id });
+    if (remote) return ok(remote.maker);
+  }
+
   return ok(maker);
 }
 
@@ -604,6 +626,7 @@ export async function saveMakerKitchen(
   patch: Partial<
     Pick<
       MakerProfile,
+      | 'display_name'
       | 'kitchen_name'
       | 'bio'
       | 'is_active'
@@ -635,6 +658,7 @@ export async function saveMakerKitchen(
       (await getMakerById(makerId)) ?? (await pullKitchenFromSupabase({ makerId }))?.maker;
     const previousSnapshot = before
       ? {
+          display_name: before.display_name,
           kitchen_name: before.kitchen_name,
           bio: before.bio,
           is_active: before.is_active,

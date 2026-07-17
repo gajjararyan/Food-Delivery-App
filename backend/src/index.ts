@@ -12,7 +12,11 @@ import { getDeliveryTracking } from '../../lib/maps/driverLocation';
 import type { Order } from '../../lib/types';
 import { computeVerifiedOrderAmounts } from '../../lib/payment/orderTotal';
 import { verifyRazorpayPaymentSignature } from '../../lib/payment/razorpaySignature';
-import { resolvePaymentCustomerId } from '../../lib/payment/apiAuth';
+import {
+  isLiveRazorpayPaymentId,
+  resolveDeclineMakerId,
+  resolvePaymentCustomerId,
+} from '../../lib/payment/apiAuth';
 
 // Load monorepo root .env when started via `npm run api:dev`
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
@@ -450,6 +454,193 @@ const sandboxSchema = z.object({
   orderId: z.string().uuid(),
   accessToken: z.string().min(3),
   customerId: z.string().uuid().optional(),
+});
+
+const declineRefundSchema = z.object({
+  orderId: z.string().uuid(),
+  makerId: z.string().uuid(),
+  accessToken: z.string().min(3),
+});
+
+/**
+ * Chef declined a paid order: refund card charge via Razorpay when live,
+ * restore any wallet credits used, and avoid double-crediting cash.
+ */
+app.post('/payments/refund-declined-order', async (req, res) => {
+  const parsed = declineRefundSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+    return;
+  }
+
+  const admin = adminClient();
+  if (!admin) {
+    res.status(503).json({ message: 'Payment service is not configured (service role)' });
+    return;
+  }
+
+  const makerId = await resolveDeclineMakerId({
+    admin,
+    supabaseUrl: SUPABASE_URL,
+    supabaseAnonKey: SUPABASE_ANON_KEY,
+    serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+    accessToken: parsed.data.accessToken,
+    orderId: parsed.data.orderId,
+    makerId: parsed.data.makerId,
+  });
+
+  if (!makerId) {
+    res.status(401).json({ message: 'Unauthorized — only this kitchen can refund the order' });
+    return;
+  }
+
+  const { data: order, error: orderError } = await admin
+    .from('orders')
+    .select('*')
+    .eq('id', parsed.data.orderId)
+    .eq('maker_id', makerId)
+    .maybeSingle();
+
+  if (orderError || !order) {
+    res.status(404).json({ message: 'Order not found' });
+    return;
+  }
+
+  if (order.status !== 'cancelled' && order.status !== 'placed') {
+    res.status(400).json({ message: 'Order cannot be refunded in its current status' });
+    return;
+  }
+
+  const snap =
+    order.thali_snapshot && typeof order.thali_snapshot === 'object'
+      ? (order.thali_snapshot as Record<string, unknown>)
+      : {};
+  const paymentSnap =
+    snap.payment && typeof snap.payment === 'object'
+      ? (snap.payment as Record<string, unknown>)
+      : {};
+
+  if (paymentSnap.declineRefundAt) {
+    res.json({
+      ok: true,
+      alreadyRefunded: true,
+      razorpayRefundId: paymentSnap.razorpayRefundId ?? null,
+      walletCredit: Number(paymentSnap.walletCreditGranted ?? 0),
+      method: paymentSnap.declineRefundMethod ?? 'prior',
+    });
+    return;
+  }
+
+  const cashPaid = Math.round(Number(order.total) * 100) / 100;
+  const creditsApplied = Math.round(Number(order.credits_applied) * 100) / 100;
+  const paymentId = (order.razorpay_payment_id as string | null) ?? null;
+  const livePayment = isLiveRazorpayPaymentId(paymentId);
+
+  let razorpayRefundId: string | null = null;
+  let razorpayRefunded = false;
+  let method: 'razorpay' | 'wallet' | 'mixed' = 'wallet';
+
+  if (livePayment && razorpayConfigured() && cashPaid > 0) {
+    try {
+      const rzp = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
+      const refund = await rzp.payments.refund(paymentId!, {
+        amount: Math.round(cashPaid * 100),
+        notes: {
+          reason: 'kitchen_declined',
+          app_order_id: order.id,
+        },
+      });
+      razorpayRefundId = typeof refund?.id === 'string' ? refund.id : null;
+      razorpayRefunded = true;
+      method = creditsApplied > 0 ? 'mixed' : 'razorpay';
+    } catch (cause) {
+      console.error('[gharkaswad-api] decline refund failed', cause);
+      res.status(502).json({
+        message: 'Razorpay refund failed — try again or credit the diner from ops',
+      });
+      return;
+    }
+  }
+
+  // Cash goes back via Razorpay when live; otherwise credit the full cash to wallet.
+  // Always restore credits_applied to the wallet.
+  const walletCredit = razorpayRefunded
+    ? creditsApplied
+    : Math.round((cashPaid + creditsApplied) * 100) / 100;
+
+  if (walletCredit > 0) {
+    const { error: creditError } = await admin.rpc('grant_credit', {
+      payload: {
+        customer_id: order.customer_id,
+        amount: walletCredit,
+        reason: `Kitchen declined order ${String(order.id).slice(0, 8)}`,
+        order_id: order.id,
+      },
+    });
+
+    if (creditError) {
+      // Fallback insert if RPC missing on older DBs.
+      const { error: insertError } = await admin.from('credits').insert({
+        customer_id: order.customer_id,
+        amount: walletCredit,
+        reason: `Kitchen declined order ${String(order.id).slice(0, 8)}`,
+        order_id: order.id,
+      });
+      if (insertError) {
+        console.error('[gharkaswad-api] grant_credit failed', creditError, insertError);
+        // Persist partial refund marker so retries do not double-refund Razorpay.
+        await admin
+          .from('orders')
+          .update({
+            thali_snapshot: {
+              ...snap,
+              payment: {
+                ...paymentSnap,
+                declineRefundAt: new Date().toISOString(),
+                declineRefundMethod: razorpayRefunded ? 'razorpay_partial' : 'failed',
+                razorpayRefundId,
+                walletCreditGranted: 0,
+                walletCreditError: insertError.message,
+              },
+            },
+          })
+          .eq('id', order.id);
+        if (razorpayRefunded) {
+          res.status(500).json({
+            message:
+              'Card was refunded but wallet credit failed — contact support with the order id',
+            razorpayRefundId,
+          });
+          return;
+        }
+        res.status(500).json({ message: insertError.message || 'Could not grant wallet credit' });
+        return;
+      }
+    }
+  }
+
+  const nextPayment = {
+    ...paymentSnap,
+    declineRefundAt: new Date().toISOString(),
+    declineRefundMethod: method,
+    razorpayRefundId,
+    walletCreditGranted: walletCredit,
+  };
+
+  await admin
+    .from('orders')
+    .update({
+      thali_snapshot: { ...snap, payment: nextPayment },
+    })
+    .eq('id', order.id);
+
+  res.json({
+    ok: true,
+    alreadyRefunded: false,
+    razorpayRefundId,
+    walletCredit,
+    method,
+  });
 });
 
 /** Local/dev path when Razorpay keys are unset or ALLOW_SANDBOX_CONFIRM=true. */

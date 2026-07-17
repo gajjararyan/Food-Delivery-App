@@ -99,6 +99,19 @@ describe('delivery fees', () => {
     expect(fees.totalCharges).toBe(52.98);
   });
 
+  it('applies higher long-distance fee in the 6–7 km outer band', () => {
+    const fees = calculateDeliveryFeeBreakdown({
+      distanceKm: 6.5,
+      itemTotal: 160,
+    });
+    expect(fees.baseDeliveryFee).toBe(35);
+    expect(fees.longDistanceFee).toBe(DELIVERY_PRICING.longDistanceFarFee);
+    // 14.9 + 35 + 30 = 79.9 → GST 14.38
+    expect(fees.feesSubtotal).toBe(79.9);
+    expect(fees.gstAmount).toBe(14.38);
+    expect(fees.totalCharges).toBe(94.28);
+  });
+
   it('uses customer-entered distance from cart', () => {
     const line = baseLine();
     expect(deliveryDistanceKmForCart(line)).toBe(3);
@@ -107,12 +120,15 @@ describe('delivery fees', () => {
     expect(isWithinDeliveryRadius(12)).toBe(false);
   });
 
-  it('blocks addresses beyond max service distance', () => {
+  it('blocks addresses beyond 7 km max service distance', () => {
     const fees = calculateDeliveryFeeBreakdown({
-      distanceKm: 12,
+      distanceKm: 7.1,
       itemTotal: 200,
     });
     expect(fees.deliveryAvailable).toBe(false);
     expect(fees.gstAmount).toBe(0);
+    expect(DELIVERY_PRICING.maxServiceDistanceKm).toBe(7);
+    expect(isWithinDeliveryRadius(7)).toBe(true);
+    expect(isWithinDeliveryRadius(7.1)).toBe(false);
   });
 });

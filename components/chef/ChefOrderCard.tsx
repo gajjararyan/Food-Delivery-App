@@ -1,6 +1,7 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { Badge, Button, Card } from '../ui';
-import { colors, spacing, typography } from '../../constants/theme';
+import { colors, radius, spacing, typography } from '../../constants/theme';
 import type { Order, ThaliComponent, Uuid } from '../../lib/types';
 import { formatInr } from '../../lib/date';
 import { formatServingLabel, type ServingUnit } from '../../lib/servingSize';
@@ -8,6 +9,7 @@ import { isIncludedComponent } from '../../lib/thaliComponents';
 import {
   chefNextActionLabel,
   orderStatusLabel,
+  shouldRevealPickupPin,
 } from '../../lib/orderStatus';
 
 type SnapshotComponent = Pick<
@@ -37,7 +39,7 @@ type Props = {
   order: Order;
   onAccept?: () => void | Promise<void>;
   onReject?: () => void | Promise<void>;
-  onAdvance?: () => void | Promise<void>;
+  onAdvance?: (opts?: { pickupPin?: string }) => void | Promise<void>;
   busy?: boolean;
 };
 
@@ -61,7 +63,6 @@ function readSnapshot(order: Order): OrderSnapshot {
       typeof snap.deliveryAddress === 'string' && snap.deliveryAddress.trim()
         ? snap.deliveryAddress.trim()
         : null,
-    // Profile display name only — never expose phone to the cook UI.
     customerName:
       typeof snap.customerName === 'string' && snap.customerName.trim()
         ? snap.customerName.trim()
@@ -97,6 +98,17 @@ export function ChefOrderCard({ order, onAccept, onReject, onAdvance, busy }: Pr
   const nextLabel = chefNextActionLabel(order.status, snap.fulfillmentMode);
   const needsAccept = order.status === 'placed';
   const isDelivery = snap.fulfillmentMode === 'delivery';
+  const isTakeaway = !isDelivery;
+  const showPin =
+    isTakeaway && Boolean(order.pickup_pin) && shouldRevealPickupPin(order.status);
+  const needsPinConfirm =
+    isTakeaway &&
+    order.status === 'out_for_delivery' &&
+    Boolean(order.pickup_pin) &&
+    Boolean(onAdvance);
+
+  const [pinDraft, setPinDraft] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
 
   const plateLines = snap.components
     .filter((c) => isIncludedComponent(c))
@@ -113,6 +125,16 @@ export function ChefOrderCard({ order, onAccept, onReject, onAdvance, busy }: Pr
       return { id: c.id, label: lineLabel(c, qty, snap.applyJain), qty };
     })
     .filter((row) => row.qty > 0);
+
+  const onConfirmPickup = () => {
+    setPinError(null);
+    const given = pinDraft.trim();
+    if (!given) {
+      setPinError('Enter the 4-digit code the customer shows you');
+      return;
+    }
+    void onAdvance?.({ pickupPin: given });
+  };
 
   return (
     <Card elevated style={styles.card}>
@@ -179,10 +201,22 @@ export function ChefOrderCard({ order, onAccept, onReject, onAdvance, busy }: Pr
         <View style={styles.pickupBox}>
           <Text style={styles.pickupLabel}>Takeaway · {customerLabel(snap)}</Text>
           <Text style={styles.pickupValue}>
-            Will pick up at your kitchen — no delivery address.
+            {showPin
+              ? 'Will pick up at your kitchen — ask for the PIN before handing over.'
+              : needsAccept
+                ? 'Will pick up at your kitchen. Accept to reveal the customer PIN.'
+                : 'Will pick up at your kitchen.'}
           </Text>
         </View>
       )}
+
+      {showPin ? (
+        <View style={styles.pinBox}>
+          <Text style={styles.pinLabel}>Customer pickup PIN</Text>
+          <Text style={styles.pinValue}>{order.pickup_pin}</Text>
+          <Text style={styles.pinHint}>Match this with the code on their tracking screen.</Text>
+        </View>
+      ) : null}
 
       {needsAccept ? (
         <View style={styles.actions}>
@@ -200,6 +234,30 @@ export function ChefOrderCard({ order, onAccept, onReject, onAdvance, busy }: Pr
             disabled={busy}
             onPress={() => void onReject?.()}
             style={styles.actionBtn}
+          />
+        </View>
+      ) : needsPinConfirm ? (
+        <View style={styles.pinConfirm}>
+          <Text style={styles.pinConfirmLabel}>Enter customer PIN to complete pickup</Text>
+          <TextInput
+            style={styles.pinInput}
+            value={pinDraft}
+            onChangeText={(t) => {
+              setPinDraft(t.replace(/\D/g, '').slice(0, 4));
+              setPinError(null);
+            }}
+            keyboardType="number-pad"
+            maxLength={4}
+            placeholder="4-digit PIN"
+            placeholderTextColor={colors.onSurfaceVariant}
+          />
+          {pinError ? <Text style={styles.pinError}>{pinError}</Text> : null}
+          <Button
+            label="Confirm picked up"
+            size="sm"
+            loading={busy}
+            onPress={onConfirmPickup}
+            style={styles.advanceBtn}
           />
         </View>
       ) : nextLabel && onAdvance ? (
@@ -254,6 +312,34 @@ const styles = StyleSheet.create({
   },
   pickupLabel: { ...typography.labelSm, color: colors.onSurfaceVariant },
   pickupValue: { ...typography.bodySm, color: colors.onSurfaceVariant },
+  pinBox: {
+    backgroundColor: colors.primaryContainer,
+    borderRadius: 12,
+    padding: spacing.md,
+    gap: 4,
+    alignItems: 'center',
+  },
+  pinLabel: { ...typography.labelSm, color: colors.onPrimary },
+  pinValue: {
+    ...typography.headlineMd,
+    color: colors.onPrimary,
+    letterSpacing: 6,
+  },
+  pinHint: { ...typography.bodySm, color: colors.onPrimary, textAlign: 'center' },
+  pinConfirm: { gap: spacing.sm, marginTop: spacing.xs },
+  pinConfirmLabel: { ...typography.labelMd, color: colors.onSurface },
+  pinInput: {
+    ...typography.headlineSm,
+    letterSpacing: 8,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    color: colors.onSurface,
+    backgroundColor: colors.surfaceContainerLowest,
+  },
+  pinError: { ...typography.bodySm, color: colors.error },
   instructionsBox: {
     backgroundColor: colors.secondaryContainer,
     borderRadius: 12,

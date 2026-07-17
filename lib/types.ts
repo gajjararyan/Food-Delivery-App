@@ -132,12 +132,35 @@ export type CartLine = {
   deliveryAddress?: string;
   /** Distance from kitchen in km — used for delivery fees. */
   deliveryDistanceKm?: number;
+  /** Delivery / pickup point coordinates (WGS84). */
+  customerLat?: number;
+  customerLng?: number;
+  /** Reference to a saved address used for delivery, or the takeaway pickup point. */
+  savedAddressId?: Uuid;
+  /** Takeaway: who is collecting the order. */
+  pickupIsSelf?: boolean;
+  pickupContactName?: string;
+  pickupLat?: number;
+  pickupLng?: number;
   /**
    * Optional note for the kitchen (spice level, allergies, “no onion”, etc.).
    * Shown to the chef on the order card — kitchens try to honour it when possible.
    */
   cookingInstructions?: string;
   mealDate: string;
+};
+
+/** Saved delivery / pickup location for a customer. */
+export type SavedAddress = {
+  id: Uuid;
+  customer_id: Uuid;
+  label: string;
+  lat: number;
+  lng: number;
+  formatted_hint: string | null;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type Subscription = {
@@ -171,6 +194,8 @@ export type Order = {
   total: number;
   razorpay_order_id: string | null;
   razorpay_payment_id: string | null;
+  /** 4-digit handoff code for takeaway orders. */
+  pickup_pin?: string | null;
   thali_snapshot: Record<string, unknown>;
   created_at: string;
   updated_at: string;

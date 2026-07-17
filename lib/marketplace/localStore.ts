@@ -291,7 +291,7 @@ export async function approveChefApplication(applicationId: Uuid): Promise<Maker
     rating_avg: 0,
     rating_count: 0,
     is_active: true,
-    is_open: true,
+    is_open: false,
     created_at: new Date().toISOString(),
   };
 
@@ -336,6 +336,7 @@ export async function updateMakerProfile(
   patch: Partial<
     Pick<
       MakerProfile,
+      | 'display_name'
       | 'kitchen_name'
       | 'bio'
       | 'is_active'

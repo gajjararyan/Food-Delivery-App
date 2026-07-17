@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { computeVerifiedOrderAmounts, orderTotalMismatch } from '../payment/orderTotal';
 import { verifyRazorpayPaymentSignature } from '../payment/razorpaySignature';
+import { isLiveRazorpayPaymentId } from '../payment/apiAuth';
 import type { Order } from '../types';
 
 const KEY_SECRET = 'test_secret_key';
@@ -8,6 +9,19 @@ const KEY_SECRET = 'test_secret_key';
 function sign(orderId: string, paymentId: string): string {
   return crypto.createHmac('sha256', KEY_SECRET).update(`${orderId}|${paymentId}`).digest('hex');
 }
+
+describe('isLiveRazorpayPaymentId', () => {
+  it('accepts real Razorpay payment ids', () => {
+    expect(isLiveRazorpayPaymentId('pay_AbCdEf123')).toBe(true);
+  });
+
+  it('rejects sandbox, local, and credits markers', () => {
+    expect(isLiveRazorpayPaymentId('pay_sandbox_123')).toBe(false);
+    expect(isLiveRazorpayPaymentId('pay_local_123')).toBe(false);
+    expect(isLiveRazorpayPaymentId('credits_only')).toBe(false);
+    expect(isLiveRazorpayPaymentId(null)).toBe(false);
+  });
+});
 
 describe('verifyRazorpayPaymentSignature', () => {
   it('accepts a valid signature', () => {

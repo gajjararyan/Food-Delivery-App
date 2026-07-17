@@ -1,12 +1,14 @@
 import { Link, useRouter } from 'expo-router';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AddressPickerPanel } from '../../components/customer/AddressPickerPanel';
 import { StitchHero } from '../../components/customer/StitchHero';
 import { Button, Card, EmptyState, Input } from '../../components/ui';
 import { ThaliComponentRow } from '../../components/customer/ThaliComponentRow';
 import { stitchImages } from '../../constants/images';
-import { DELIVERY_PRICING } from '../../constants/delivery';
+import { DELIVERY_LOCATIONS, DELIVERY_PRICING } from '../../constants/delivery';
 import { colors, radius, spacing, typography } from '../../constants/theme';
+import { useAuth } from '../../hooks/useAuth';
 import { useCart } from '../../hooks/useCart';
 import {
   calculateCartTotals,
@@ -14,11 +16,15 @@ import {
   mealSlotLabel,
 } from '../../lib/delivery';
 import { applyJainSubstitution } from '../../lib/jain';
+import { estimateTravel } from '../../lib/maps/distanceEstimate';
+import { formatSpotTitle } from '../../lib/maps/formatLocation';
+import { fetchCommunityMaker } from '../../lib/api/chefs';
+import { hasKitchenPin } from '../../lib/marketplace/kitchenStatus';
 import { calculateThaliPrice } from '../../lib/pricing';
 import { isIncludedComponent } from '../../lib/thaliComponents';
 import { customerAddonSectionTitle, customerPlateSectionTitle } from '../../lib/chef/componentSimple';
 import { formatInr } from '../../lib/date';
-import type { FulfillmentMode, Uuid } from '../../lib/types';
+import type { FulfillmentMode, MakerProfile, Uuid } from '../../lib/types';
 
 const FULFILLMENT_OPTIONS: { mode: FulfillmentMode; title: string; hint: string }[] = [
   {
@@ -42,16 +48,39 @@ function formatFee(amount: number): string {
 
 export default function CartScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const {
     line,
     clearCart,
     updateQuantities,
     setFulfillmentMode,
-    setDeliveryAddress,
-    setDeliveryDistanceKm,
+    setDeliveryLocation,
+    setPickupDetails,
     setCookingInstructions,
     hasItems,
   } = useCart();
+  const [maker, setMaker] = useState<MakerProfile | null>(null);
+
+  useEffect(() => {
+    if (!line?.makerId) {
+      setMaker(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchCommunityMaker(line.makerId).then((result) => {
+      if (!cancelled && result.ok) setMaker(result.data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [line?.makerId]);
+
+  const kitchenReady = hasKitchenPin(maker);
+
+  const kitchenPoint = useMemo(() => {
+    if (!kitchenReady || maker?.lat == null || maker?.lng == null) return null;
+    return { lat: maker.lat, lng: maker.lng };
+  }, [kitchenReady, maker?.lat, maker?.lng]);
 
   const priced = useMemo(() => {
     if (!line) return null;
@@ -83,6 +112,39 @@ export default function CartScreen() {
     [displayComponents],
   );
 
+  const travelEstimate = useMemo(() => {
+    if (!kitchenPoint || !line?.customerLat || !line?.customerLng) return null;
+    return estimateTravel(kitchenPoint, {
+      lat: line.customerLat,
+      lng: line.customerLng,
+    });
+  }, [line?.customerLat, line?.customerLng, kitchenPoint]);
+
+  // Keep fee distance in sync with kitchen pin + address (road estimate).
+  useEffect(() => {
+    if (!line || line.fulfillmentMode !== 'delivery') return;
+    if (!kitchenPoint || line.customerLat == null || line.customerLng == null) return;
+    const travel = estimateTravel(kitchenPoint, {
+      lat: line.customerLat,
+      lng: line.customerLng,
+    });
+    const next = Math.round(travel.km * 10) / 10;
+    const prev = line.deliveryDistanceKm;
+    if (prev != null && Math.abs(prev - next) < 0.05) return;
+    setDeliveryLocation({
+      label: line.deliveryAddress || formatSpotTitle({ label: 'Delivery', hint: null }),
+      hint: null,
+      lat: line.customerLat,
+      lng: line.customerLng,
+      distanceKm: next,
+      savedAddressId: line.savedAddressId,
+    });
+  }, [
+    line,
+    kitchenPoint,
+    setDeliveryLocation,
+  ]);
+
   const patchQuantity = (componentId: Uuid, next: number) => {
     updateQuantities({ ...line!.quantities, [componentId]: next });
   };
@@ -101,11 +163,16 @@ export default function CartScreen() {
     );
   }
 
+  const kitchenBlocked = !kitchenReady;
+
   const deliveryBlocked =
     line.fulfillmentMode === 'delivery' &&
     (!line.deliveryAddress?.trim() ||
+      line.customerLat == null ||
+      line.customerLng == null ||
       !totals.deliveryAvailable ||
-      totals.distanceKm === null);
+      totals.distanceKm === null ||
+      kitchenBlocked);
 
   return (
     <View style={styles.safe}>
@@ -190,30 +257,92 @@ export default function CartScreen() {
         </View>
 
         {line.fulfillmentMode === 'delivery' ? (
-          <Card style={styles.addressCard}>
-            <Text style={styles.sectionLabel}>Deliver to</Text>
-            <Input
-              label="Your address"
-              value={line.deliveryAddress ?? ''}
-              onChangeText={setDeliveryAddress}
-              placeholder="Flat, street, area, landmark…"
+          <>
+            <AddressPickerPanel
+              customerId={user?.id}
+              selectedId={line.savedAddressId}
+              selectedLabel={line.deliveryAddress}
+              selectedLat={line.customerLat}
+              selectedLng={line.customerLng}
+              title="Deliver to"
+              onSelect={(picked) => {
+                const travel = kitchenPoint
+                  ? estimateTravel(kitchenPoint, {
+                      lat: picked.lat,
+                      lng: picked.lng,
+                    })
+                  : null;
+                setDeliveryLocation({
+                  label: formatSpotTitle({
+                    label: picked.label,
+                    hint: picked.hint,
+                  }),
+                  hint: picked.hint,
+                  lat: picked.lat,
+                  lng: picked.lng,
+                  distanceKm: travel?.km ?? 0,
+                  savedAddressId: picked.savedAddressId,
+                });
+              }}
             />
-            <Input
-              label="Distance from kitchen (km)"
-              keyboardType="decimal-pad"
-              value={
-                line.deliveryDistanceKm !== undefined
-                  ? String(line.deliveryDistanceKm)
-                  : ''
+            {!kitchenReady ? (
+              <Text style={styles.addressHint}>
+                Delivery distance needs the cook’s kitchen pin. Ask them to set it on their Menu
+                tab — your address below is ready.
+              </Text>
+            ) : travelEstimate && !totals.deliveryAvailable ? (
+              <Text style={styles.warningInline}>
+                Too far: ~{travelEstimate.km} km away. This kitchen delivers only within{' '}
+                {DELIVERY_PRICING.maxServiceDistanceKm} km — pick a nearer address or switch to
+                takeaway.
+              </Text>
+            ) : travelEstimate ? (
+              <Text style={styles.addressHint}>
+                Kitchen → you: ~{travelEstimate.km} km road approx. · ~{travelEstimate.minutes} min.
+                Delivery radius: {DELIVERY_PRICING.maxServiceDistanceKm} km.
+              </Text>
+            ) : (
+              <Text style={styles.addressHint}>
+                Your permanent address is used by default. Tap Change if you want a different pin
+                for this order. Delivery is within {DELIVERY_PRICING.maxServiceDistanceKm} km of
+                the kitchen.
+              </Text>
+            )}
+          </>
+        ) : null}
+
+        {line.fulfillmentMode === 'takeaway' ? (
+          <>
+            <AddressPickerPanel
+              customerId={user?.id}
+              selectedId={line.savedAddressId}
+              selectedLabel={
+                line.pickupLat != null && line.pickupLng != null
+                  ? line.deliveryAddress ?? null
+                  : null
               }
-              onChangeText={setDeliveryDistanceKm}
-              placeholder="e.g. 3.5"
+              selectedLat={line.pickupLat}
+              selectedLng={line.pickupLng}
+              title="Pickup starting point (optional)"
+              onSelect={(picked) =>
+                setPickupDetails({
+                  pickupIsSelf: true,
+                  pickupContactName: null,
+                  label: formatSpotTitle({
+                    label: picked.label,
+                    hint: picked.hint,
+                  }),
+                  lat: picked.lat,
+                  lng: picked.lng,
+                  savedAddressId: picked.savedAddressId ?? null,
+                })
+              }
             />
             <Text style={styles.addressHint}>
-              Enter how far you are from the kitchen. Delivery up to{' '}
-              {DELIVERY_PRICING.maxServiceDistanceKm} km.
+              Optional: where you’re coming from (defaults to your permanent address). You can
+              change it or skip — set later at checkout if you prefer.
             </Text>
-          </Card>
+          </>
         ) : null}
 
         <Card style={styles.noteCard}>
@@ -247,11 +376,20 @@ export default function CartScreen() {
           </Text>
         </Card>
 
-        {deliveryBlocked ? (
+        {kitchenBlocked ? (
           <Text style={styles.warning}>
-            {totals.distanceKm === null
-              ? 'Enter your address and distance (km) for delivery fees.'
-              : `Delivery is not available beyond ${DELIVERY_PRICING.maxServiceDistanceKm} km. Try takeaway or a nearer address.`}
+            This cook hasn’t set their kitchen map pin yet (Menu tab → kitchen location). Orders
+            stay paused until they add it — this is not about your delivery address.
+          </Text>
+        ) : null}
+
+        {deliveryBlocked && !kitchenBlocked ? (
+          <Text style={styles.warning}>
+            {line.customerLat == null || !line.deliveryAddress?.trim()
+              ? 'Choose a delivery location on the map to continue.'
+              : totals.distanceKm != null && !totals.deliveryAvailable
+                ? `Delivery is only within ${DELIVERY_PRICING.maxServiceDistanceKm} km (~${totals.distanceKm.toFixed(1)} km away). Try takeaway or a nearer address.`
+                : `Delivery is not available beyond ${DELIVERY_PRICING.maxServiceDistanceKm} km. Try takeaway or a nearer address.`}
           </Text>
         ) : null}
 
@@ -299,7 +437,7 @@ export default function CartScreen() {
             label="Continue to checkout"
             size="lg"
             style={styles.cta}
-            disabled={deliveryBlocked}
+            disabled={deliveryBlocked || kitchenBlocked}
           />
         </Link>
       </View>
@@ -367,8 +505,8 @@ const styles = StyleSheet.create({
   fulfillmentTitle: { ...typography.labelMd, color: colors.onSurface },
   fulfillmentHint: { ...typography.bodySm, color: colors.onSurfaceVariant, lineHeight: 18 },
   fulfillmentTextSelected: { color: colors.primary },
-  addressCard: { gap: spacing.sm, backgroundColor: colors.surfaceContainerLow },
   addressHint: { ...typography.bodySm, color: colors.onSurfaceVariant, lineHeight: 18 },
+  warningInline: { ...typography.bodySm, color: colors.error, lineHeight: 18 },
   noteCard: { gap: spacing.sm, backgroundColor: colors.surfaceContainerLow },
   noteHint: { ...typography.bodySm, color: colors.onSurfaceVariant, lineHeight: 18 },
   noteInput: {

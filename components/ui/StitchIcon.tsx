@@ -12,7 +12,12 @@ export type StitchIconName =
   | 'restaurant'
   | 'arrow-back'
   | 'arrow-forward'
-  | 'payment';
+  | 'payment'
+  | 'add'
+  | 'more-vert'
+  | 'navigation'
+  | 'person'
+  | 'group';
 
 export type StitchIconProps = {
   name: StitchIconName;

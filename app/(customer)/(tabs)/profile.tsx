@@ -76,6 +76,18 @@ export default function ProfileTab() {
         ) : null}
 
         <Card style={styles.card}>
+          <Text style={styles.rowLabel}>Wallet</Text>
+          <Link href="/(customer)/wallet">
+            <Text style={styles.link}>View credits</Text>
+          </Link>
+        </Card>
+        <Card style={styles.card}>
+          <Text style={styles.rowLabel}>My addresses</Text>
+          <Link href="/(customer)/addresses">
+            <Text style={styles.link}>Manage</Text>
+          </Link>
+        </Card>
+        <Card style={styles.card}>
           <Text style={styles.rowLabel}>Dietary preferences</Text>
           <Link href="/(customer)/dietary">
             <Text style={styles.link}>Manage</Text>

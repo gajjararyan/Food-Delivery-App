@@ -27,6 +27,24 @@ type CartContextValue = {
   setDeliveryAddress: (address: string) => void;
   setDeliveryDistanceKm: (distanceKm: string) => void;
   setCookingInstructions: (note: string) => void;
+  /** Delivery: pin + auto distance from kitchen. */
+  setDeliveryLocation: (params: {
+    label: string;
+    hint?: string | null;
+    lat: number;
+    lng: number;
+    distanceKm: number;
+    savedAddressId?: Uuid;
+  }) => void;
+  /** Takeaway: who is picking up + pickup pin coords. */
+  setPickupDetails: (params: {
+    pickupIsSelf: boolean;
+    pickupContactName?: string | null;
+    label?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    savedAddressId?: Uuid | null;
+  }) => void;
   hasItems: boolean;
   lineTotal: number;
   pendingOrderId: Uuid | null;
@@ -153,6 +171,71 @@ export function CartProvider({ children }: PropsWithChildren) {
     });
   }, []);
 
+  const setDeliveryLocation = useCallback(
+    (params: {
+      label: string;
+      hint?: string | null;
+      lat: number;
+      lng: number;
+      distanceKm: number;
+      savedAddressId?: Uuid;
+    }) => {
+      setLineState((prev) => {
+        if (!prev) return prev;
+        const next: CartLine = {
+          ...prev,
+          deliveryAddress: params.label,
+          deliveryDistanceKm: Math.round(params.distanceKm * 10) / 10,
+          customerLat: params.lat,
+          customerLng: params.lng,
+          savedAddressId: params.savedAddressId,
+        };
+        void AsyncStorage.setItem(CART_LINE_KEY, JSON.stringify(next));
+        return next;
+      });
+    },
+    [],
+  );
+
+  const setPickupDetails = useCallback(
+    (params: {
+      pickupIsSelf: boolean;
+      pickupContactName?: string | null;
+      label?: string | null;
+      lat?: number | null;
+      lng?: number | null;
+      savedAddressId?: Uuid | null;
+    }) => {
+      setLineState((prev) => {
+        if (!prev) return prev;
+        const next: CartLine = {
+          ...prev,
+          pickupIsSelf: params.pickupIsSelf,
+          pickupContactName: params.pickupContactName?.trim() || undefined,
+        };
+
+        if ('lat' in params) {
+          next.pickupLat = params.lat ?? undefined;
+          next.customerLat = params.lat ?? undefined;
+        }
+        if ('lng' in params) {
+          next.pickupLng = params.lng ?? undefined;
+          next.customerLng = params.lng ?? undefined;
+        }
+        if ('savedAddressId' in params) {
+          next.savedAddressId = params.savedAddressId ?? undefined;
+        }
+        if (params.label != null) {
+          next.deliveryAddress = params.label.trim() || undefined;
+        }
+
+        void AsyncStorage.setItem(CART_LINE_KEY, JSON.stringify(next));
+        return next;
+      });
+    },
+    [],
+  );
+
   const lineTotal = useMemo(() => {
     if (!line) return 0;
     const itemTotal = calculateThaliPrice(
@@ -176,6 +259,8 @@ export function CartProvider({ children }: PropsWithChildren) {
       setDeliveryAddress,
       setDeliveryDistanceKm,
       setCookingInstructions,
+      setDeliveryLocation,
+      setPickupDetails,
       hasItems: Boolean(line),
       lineTotal,
       pendingOrderId,
@@ -192,6 +277,8 @@ export function CartProvider({ children }: PropsWithChildren) {
       setDeliveryAddress,
       setDeliveryDistanceKm,
       setCookingInstructions,
+      setDeliveryLocation,
+      setPickupDetails,
       lineTotal,
       pendingOrderId,
       setPendingOrderId,

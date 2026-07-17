@@ -6,7 +6,15 @@ import { canSkipMeal, sumCreditLedger } from '../credits';
 import { pauseSubscriptionDateLocal } from './subscriptions';
 import { readJsonMap, writeJsonMap } from '../offlineStore';
 
-type CreditRow = { id: Uuid; amount: number; reason: string };
+export type CreditLedgerEntry = {
+  id: Uuid;
+  amount: number;
+  reason: string;
+  order_id?: Uuid | null;
+  created_at?: string;
+};
+
+type CreditRow = CreditLedgerEntry;
 
 const CREDITS_KEY = 'gharkaswad_offline_credits_v1';
 let memoryCredits: Map<string, CreditRow[]> | null = null;
@@ -21,6 +29,102 @@ async function offlineCredits(): Promise<Map<string, CreditRow[]>> {
 async function persistOfflineCredits(map: Map<string, CreditRow[]>): Promise<void> {
   memoryCredits = map;
   await writeJsonMap(CREDITS_KEY, map);
+}
+
+/** Grant wallet credits (e.g. kitchen declined a paid order). */
+export async function grantCredit(params: {
+  customerId: Uuid;
+  amount: number;
+  reason: string;
+  orderId?: Uuid | null;
+}): Promise<Result<{ creditId: Uuid }>> {
+  const amount = Math.round(params.amount * 100) / 100;
+  if (!(amount > 0)) {
+    return err('VALIDATION', 'Credit amount must be positive');
+  }
+
+  if (!isSupabaseConfigured) {
+    const creditId = crypto.randomUUID();
+    const map = await offlineCredits();
+    const rows = map.get(params.customerId) ?? [];
+    rows.push({
+      id: creditId,
+      amount,
+      reason: params.reason,
+      order_id: params.orderId ?? null,
+      created_at: new Date().toISOString(),
+    });
+    map.set(params.customerId, rows);
+    await persistOfflineCredits(map);
+    return ok({ creditId });
+  }
+
+  const { data, error } = await supabase.rpc('grant_credit', {
+    payload: {
+      customer_id: params.customerId,
+      amount,
+      reason: params.reason,
+      order_id: params.orderId ?? null,
+    },
+  });
+
+  if (error || !data) {
+    // Fallback insert if RPC not migrated yet.
+    const inserted = await supabase
+      .from('credits')
+      .insert({
+        customer_id: params.customerId,
+        amount,
+        reason: params.reason,
+        order_id: params.orderId ?? null,
+      })
+      .select('id')
+      .single();
+    if (inserted.error || !inserted.data) {
+      logger.error('grantCredit failed', error ?? inserted.error);
+      return err(
+        'UNKNOWN',
+        error?.message ?? inserted.error?.message ?? 'Could not grant credit',
+        error ?? inserted.error,
+      );
+    }
+    return ok({ creditId: inserted.data.id as Uuid });
+  }
+
+  return ok({ creditId: (data as { id: string }).id as Uuid });
+}
+
+export async function listCredits(customerId: Uuid): Promise<Result<CreditLedgerEntry[]>> {
+  if (!customerId) return ok([]);
+
+  if (!isSupabaseConfigured) {
+    const map = await offlineCredits();
+    const rows = [...(map.get(customerId) ?? [])].sort((a, b) =>
+      (b.created_at ?? '').localeCompare(a.created_at ?? ''),
+    );
+    return ok(rows);
+  }
+
+  const { data, error } = await supabase
+    .from('credits')
+    .select('id, amount, reason, order_id, created_at')
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    logger.error('listCredits failed', error);
+    return err('UNKNOWN', error.message, error);
+  }
+
+  return ok(
+    (data ?? []).map((row) => ({
+      id: row.id as Uuid,
+      amount: Number(row.amount) || 0,
+      reason: String(row.reason ?? ''),
+      order_id: (row.order_id as Uuid | null) ?? null,
+      created_at: String(row.created_at ?? ''),
+    })),
+  );
 }
 
 export async function getCreditBalance(customerId: Uuid): Promise<Result<number>> {

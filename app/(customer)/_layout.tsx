@@ -19,6 +19,8 @@ function routeRequiresAuth(segments: string[]): boolean {
   const path = segments.join('/');
   return (
     path.includes('checkout') ||
+    path.includes('addresses') ||
+    path.includes('wallet') ||
     path.includes('delete-account') ||
     path.includes('payment-failed') ||
     path.includes('pause-skip') ||
@@ -36,6 +38,8 @@ function routeRequiresAuth(segments: string[]): boolean {
     segments.includes('order') ||
     segments.includes('invoice') ||
     segments.includes('checkout') ||
+    segments.includes('addresses') ||
+    segments.includes('wallet') ||
     segments.includes('payment-failed') ||
     segments.includes('pause-skip') ||
     segments.includes('meal-calendar')
@@ -106,6 +110,14 @@ export default function CustomerLayout() {
       />
       <Stack.Screen name="cart" options={{ ...stackHeaderOptions, title: 'Cart' }} />
       <Stack.Screen name="checkout" options={{ ...stackHeaderOptions, title: 'Checkout' }} />
+      <Stack.Screen
+        name="addresses"
+        options={{ ...stackHeaderOptions, title: 'My Addresses' }}
+      />
+      <Stack.Screen
+        name="wallet"
+        options={{ ...stackHeaderOptions, title: 'Wallet' }}
+      />
       <Stack.Screen
         name="tracking/[orderId]"
         options={{ ...stackHeaderOptions, title: 'Track order' }}

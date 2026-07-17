@@ -1,0 +1,25 @@
+# Deploy on Render: New → Blueprint → connect this repo
+# Or: New Web Service → Root Directory = backend
+services:
+  - type: web
+    name: gharkaswad-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PORT
+        value: "3001"
+      # Set these in the Render dashboard (Do not commit secrets):
+      # EXPO_PUBLIC_SUPABASE_URL
+      # EXPO_PUBLIC_SUPABASE_ANON_KEY
+      # SUPABASE_SERVICE_ROLE_KEY
+      # EXPO_PUBLIC_RAZORPAY_KEY_ID
+      # RAZORPAY_KEY_SECRET
+      # ALLOW_SANDBOX_CONFIRM=true  (pilot)
+      - key: ALLOW_SANDBOX_CONFIRM
+        value: "true"

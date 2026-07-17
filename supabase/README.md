@@ -38,7 +38,13 @@ supabase/
 6. New query → paste and **Run** all of:  
    `migrations/20260710150000_live_orders.sql`  
    (cook ↔ customer live order status)
-7. Confirm in **Table Editor** you see: `profiles`, `maker_profiles`, `menu_items`, `orders`, `app_admins`, etc.
+7. Addresses + pickup PIN + place_order updates:  
+   `migrations/20260716120000_addresses_and_pickup.sql`
+8. Tighten addresses RLS:  
+   `migrations/20260716140000_addresses_rls_tighten.sql`
+9. Orders RLS + `grant_credit` RPC (decline refunds / wallet):  
+   `migrations/20260716150000_orders_rls_and_credits.sql`
+10. Confirm in **Table Editor** you see: `profiles`, `maker_profiles`, `menu_items`, `orders`, `addresses`, `credits`, `app_admins`, etc.
 
 ### 4. Put keys in `.env`
 Project → **Settings** → **API**:

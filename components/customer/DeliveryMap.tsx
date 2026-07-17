@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { StitchIcon } from '../ui';
 import { colors, radius, spacing, typography } from '../../constants/theme';
 import type { DeliveryTrackingSnapshot } from '../../lib/maps/driverLocation';
 import { isGoogleMapsConfigured } from '../../lib/maps/config';
+import { googleMapsNavigateUrl } from '../../lib/maps/distanceEstimate';
 import {
   createWebMap,
   loadGoogleMapsScript,
   updateWebMap,
   type WebMapHandles,
 } from '../../lib/maps/googleMapsLoader.web';
+import { loadLeaflet } from '../../lib/maps/leafletLoader.web';
 
 type Props = {
   tracking: DeliveryTrackingSnapshot;
@@ -33,44 +36,6 @@ type LeafletPolyline = {
   setLatLngs: (latlngs: Array<[number, number]>) => void;
   remove: () => void;
 };
-
-let leafletLoader: Promise<void> | null = null;
-
-function loadLeaflet(): Promise<void> {
-  if (typeof window === 'undefined') return Promise.resolve();
-  if (window.L) return Promise.resolve();
-  if (leafletLoader) return leafletLoader;
-
-  leafletLoader = new Promise((resolve, reject) => {
-    const existingCss = document.querySelector('link[data-gharkaswad-leaflet="true"]');
-    if (!existingCss) {
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      link.dataset.gharkaswadLeaflet = 'true';
-      document.head.appendChild(link);
-    }
-
-    const existing = document.querySelector<HTMLScriptElement>(
-      'script[data-gharkaswad-leaflet="true"]',
-    );
-    if (existing) {
-      existing.addEventListener('load', () => resolve());
-      existing.addEventListener('error', () => reject(new Error('Map failed to load')));
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.async = true;
-    script.dataset.gharkaswadLeaflet = 'true';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Map failed to load'));
-    document.head.appendChild(script);
-  });
-
-  return leafletLoader;
-}
 
 type OsmHandles = {
   map: LeafletMap;
@@ -109,7 +74,7 @@ function createOsmMap(container: HTMLElement, tracking: DeliveryTrackingSnapshot
     .addTo(map)
     .bindPopup(tracking.kitchen.title);
 
-  if (!tracking.showDriver) {
+  if (!tracking.showRoute && !tracking.showDriver) {
     map.setView([tracking.kitchen.lat, tracking.kitchen.lng], 15);
     return {
       map,
@@ -120,10 +85,11 @@ function createOsmMap(container: HTMLElement, tracking: DeliveryTrackingSnapshot
     };
   }
 
+  const pickupLabel = tracking.fulfillmentMode === 'takeaway' ? 'P' : 'H';
   const customerMarker = L.marker([tracking.customer.lat, tracking.customer.lng], {
     icon: L.divIcon({
       className: '',
-      html: pinHtml('H', '#2E7D32'),
+      html: pinHtml(pickupLabel, '#2E7D32'),
       iconSize: [28, 28],
       iconAnchor: [14, 28],
     }),
@@ -131,23 +97,31 @@ function createOsmMap(container: HTMLElement, tracking: DeliveryTrackingSnapshot
     .addTo(map)
     .bindPopup(tracking.customer.title);
 
-  const driverMarker = L.marker([tracking.driver.lat, tracking.driver.lng], {
-    icon: L.divIcon({
-      className: '',
-      html: pinHtml('D', '#1565C0'),
-      iconSize: [28, 28],
-      iconAnchor: [14, 28],
-    }),
-  })
-    .addTo(map)
-    .bindPopup(tracking.driver.title);
+  let driverMarker: LeafletMarker | null = null;
+  if (tracking.showDriver) {
+    driverMarker = L.marker([tracking.driver.lat, tracking.driver.lng], {
+      icon: L.divIcon({
+        className: '',
+        html: pinHtml('D', '#1565C0'),
+        iconSize: [28, 28],
+        iconAnchor: [14, 28],
+      }),
+    })
+      .addTo(map)
+      .bindPopup(tracking.driver.title);
+  }
 
-  const routeLine = L.polyline(
-    tracking.route.map((p) => [p.lat, p.lng] as [number, number]),
-    { color: '#E85D2C', weight: 5, opacity: 0.9 },
-  ).addTo(map);
+  const routeLine = tracking.showRoute
+    ? L.polyline(
+        tracking.route.map((p) => [p.lat, p.lng] as [number, number]),
+        { color: '#E85D2C', weight: 5, opacity: 0.9 },
+      ).addTo(map)
+    : null;
 
-  const group = L.featureGroup([kitchenMarker, customerMarker, driverMarker, routeLine]);
+  const layers: unknown[] = [kitchenMarker, customerMarker];
+  if (driverMarker) layers.push(driverMarker);
+  if (routeLine) layers.push(routeLine);
+  const group = L.featureGroup(layers as never);
   map.fitBounds(group.getBounds(), { padding: [40, 40] });
 
   return { map, kitchenMarker, customerMarker, driverMarker, routeLine };
@@ -155,15 +129,18 @@ function createOsmMap(container: HTMLElement, tracking: DeliveryTrackingSnapshot
 
 function updateOsmMap(handles: OsmHandles, tracking: DeliveryTrackingSnapshot): void {
   handles.kitchenMarker.setLatLng([tracking.kitchen.lat, tracking.kitchen.lng]);
-  if (!tracking.showDriver) {
+  if (!tracking.showRoute && !tracking.showDriver) {
     handles.map.setView([tracking.kitchen.lat, tracking.kitchen.lng], 15);
     return;
   }
-  handles.driverMarker?.setLatLng([tracking.driver.lat, tracking.driver.lng]);
+  handles.customerMarker?.setLatLng([tracking.customer.lat, tracking.customer.lng]);
+  if (tracking.showDriver) {
+    handles.driverMarker?.setLatLng([tracking.driver.lat, tracking.driver.lng]);
+  }
   handles.routeLine?.setLatLngs(tracking.route.map((p) => [p.lat, p.lng] as [number, number]));
 }
 
-/** Interactive map — kitchen-only for takeaway; kitchen + driver route for delivery. */
+/** Interactive map — kitchen + optional pickup/customer route; driver only for delivery. */
 export function DeliveryMap({ tracking, style }: Props) {
   const googleHandlesRef = useRef<WebMapHandles | null>(null);
   const osmHandlesRef = useRef<OsmHandles | null>(null);
@@ -173,15 +150,21 @@ export function DeliveryMap({ tracking, style }: Props) {
   const [provider, setProvider] = useState<'google' | 'osm' | null>(null);
 
   const legend = useMemo(() => {
-    if (!tracking.showDriver) {
+    if (!tracking.showRoute && !tracking.showDriver) {
       return [{ key: 'K', label: 'Kitchen (pickup)', color: '#E85D2C' }];
+    }
+    if (tracking.fulfillmentMode === 'takeaway') {
+      return [
+        { key: 'K', label: 'Kitchen', color: '#E85D2C' },
+        { key: 'P', label: tracking.liveOrigin ? 'You (now)' : 'You / pickup', color: '#2E7D32' },
+      ];
     }
     return [
       { key: 'K', label: 'Kitchen', color: '#E85D2C' },
       { key: 'D', label: 'Driver', color: '#1565C0' },
       { key: 'H', label: 'You', color: '#2E7D32' },
     ];
-  }, [tracking.showDriver]);
+  }, [tracking.showDriver, tracking.showRoute, tracking.fulfillmentMode, tracking.liveOrigin]);
 
   useEffect(() => {
     if (!mapHost) return;
@@ -228,9 +211,9 @@ export function DeliveryMap({ tracking, style }: Props) {
       setProvider(null);
       if (mapHost) mapHost.innerHTML = '';
     };
-    // Re-init when switching delivery ↔ takeaway so markers match.
+    // Re-init when map mode / road geometry source changes so fitBounds matches the path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapHost, tracking.showDriver]);
+  }, [mapHost, tracking.showDriver, tracking.showRoute, tracking.byRoad, tracking.route.length]);
 
   useEffect(() => {
     if (!ready) return;
@@ -250,6 +233,20 @@ export function DeliveryMap({ tracking, style }: Props) {
       ? `ETA ${tracking.etaMinutes} min`
       : 'Arrived';
 
+  const travelLabel =
+    tracking.showRoute &&
+    tracking.travelKm != null &&
+    tracking.travelMinutes != null
+      ? `${tracking.travelMinutes} min · ${tracking.travelKm} km`
+      : null;
+
+  const onNavigate = () => {
+    const origin = tracking.showRoute
+      ? { lat: tracking.customer.lat, lng: tracking.customer.lng }
+      : null;
+    void Linking.openURL(googleMapsNavigateUrl(tracking.kitchen, origin));
+  };
+
   return (
     <View style={[styles.wrap, style]}>
       <View
@@ -268,9 +265,23 @@ export function DeliveryMap({ tracking, style }: Props) {
           <Text style={styles.bannerText}>{error}</Text>
         </View>
       ) : null}
+      {travelLabel ? (
+        <View style={styles.distanceCallout} pointerEvents="none">
+          <Text style={styles.distanceCalloutTime}>
+            {tracking.travelMinutes} min
+          </Text>
+          <Text style={styles.distanceCalloutKm}>
+            {tracking.travelKm} km{tracking.byRoad ? ' by road' : ' approx.'}
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.etaPill}>
         <Text style={styles.etaText}>{etaText}</Text>
       </View>
+      <Pressable style={styles.navPill} onPress={onNavigate} accessibilityRole="button">
+        <StitchIcon name="navigation" size={14} color={colors.onPrimary} />
+        <Text style={styles.navText}>Navigate</Text>
+      </Pressable>
       <View style={styles.legend}>
         {legend.map((item) => (
           <View key={item.key} style={styles.legendItem}>
@@ -319,6 +330,43 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   etaText: { ...typography.labelSm, color: colors.onPrimary },
+  distanceCallout: {
+    position: 'absolute',
+    top: '42%',
+    alignSelf: 'center',
+    left: '50%',
+    transform: [{ translateX: -56 }],
+    minWidth: 112,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+  },
+  distanceCalloutTime: {
+    ...typography.labelMd,
+    color: '#1B5E20',
+    fontSize: 16,
+  },
+  distanceCalloutKm: {
+    ...typography.labelSm,
+    color: colors.onSurfaceVariant,
+  },
+  navPill: {
+    position: 'absolute',
+    top: spacing.sm + 36,
+    right: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.tertiary ?? '#2E7D32',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  navText: { ...typography.labelSm, color: colors.onPrimary },
   legend: {
     position: 'absolute',
     left: spacing.sm,

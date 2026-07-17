@@ -5,6 +5,7 @@ import {
   nextOrderStatus,
   ORDER_STATUS_FLOW,
   orderStatusLabel,
+  shouldRevealPickupPin,
 } from '../orderStatus';
 import type { Order } from '../types';
 
@@ -22,6 +23,16 @@ describe('order acceptance flow', () => {
     expect(nextOrderStatus('cooking')).toBe('out_for_delivery');
     expect(nextOrderStatus('out_for_delivery')).toBe('delivered');
     expect(nextOrderStatus('delivered')).toBeNull();
+  });
+
+  it('hides pickup PIN until cook accepts', () => {
+    expect(shouldRevealPickupPin('placed')).toBe(false);
+    expect(shouldRevealPickupPin('payment_pending')).toBe(false);
+    expect(shouldRevealPickupPin('accepted')).toBe(true);
+    expect(shouldRevealPickupPin('cooking')).toBe(true);
+    expect(shouldRevealPickupPin('out_for_delivery')).toBe(true);
+    expect(shouldRevealPickupPin('delivered')).toBe(true);
+    expect(shouldRevealPickupPin('cancelled')).toBe(false);
   });
 
   it('labels chef actions for delivery vs takeaway', () => {

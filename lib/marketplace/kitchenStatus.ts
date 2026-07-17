@@ -1,5 +1,18 @@
 import type { MakerProfile } from '../types';
 
+/** True when the kitchen has a usable map pin for fees / tracking. */
+export function hasKitchenPin(
+  maker: Pick<MakerProfile, 'lat' | 'lng'> | null | undefined,
+): boolean {
+  return (
+    maker != null &&
+    typeof maker.lat === 'number' &&
+    Number.isFinite(maker.lat) &&
+    typeof maker.lng === 'number' &&
+    Number.isFinite(maker.lng)
+  );
+}
+
 /** Chef-controlled accepting-orders flag (defaults to open when unset). */
 export function isKitchenOpen(maker: Pick<MakerProfile, 'is_open'>): boolean {
   return maker.is_open !== false;

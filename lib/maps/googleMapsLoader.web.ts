@@ -38,6 +38,7 @@ export function loadGoogleMapsScript(): Promise<void> {
       }
 
       const script = document.createElement('script');
+      // Maps JavaScript API only (no Directions / Distance Matrix / Geocoding).
       script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}`;
       script.async = true;
       script.defer = true;
@@ -68,7 +69,7 @@ export function createWebMap(
 
   const map = new googleMaps.maps.Map(container, {
     center: tracking.kitchen,
-    zoom: tracking.showDriver ? 13 : 15,
+    zoom: tracking.showRoute || tracking.showDriver ? 13 : 15,
     disableDefaultUI: false,
     gestureHandling: 'greedy',
   });
@@ -80,7 +81,7 @@ export function createWebMap(
     label: 'K',
   });
 
-  if (!tracking.showDriver) {
+  if (!tracking.showRoute && !tracking.showDriver) {
     return {
       map,
       kitchenMarker,
@@ -94,27 +95,33 @@ export function createWebMap(
     map,
     position: tracking.customer,
     title: tracking.customer.title,
-    label: 'H',
-  });
-  const driverMarker = new googleMaps.maps.Marker({
-    map,
-    position: tracking.driver,
-    title: tracking.driver.title,
-    label: 'D',
+    label: tracking.fulfillmentMode === 'takeaway' ? 'P' : 'H',
   });
 
-  const routeLine = new googleMaps.maps.Polyline({
-    map,
-    path: tracking.route,
-    strokeColor: '#E85D2C',
-    strokeOpacity: 0.85,
-    strokeWeight: 4,
-  });
+  let driverMarker: GoogleMarker | null = null;
+  if (tracking.showDriver) {
+    driverMarker = new googleMaps.maps.Marker({
+      map,
+      position: tracking.driver,
+      title: tracking.driver.title,
+      label: 'D',
+    });
+  }
+
+  const routeLine = tracking.showRoute
+    ? new googleMaps.maps.Polyline({
+        map,
+        path: tracking.route,
+        strokeColor: '#E85D2C',
+        strokeOpacity: 0.85,
+        strokeWeight: 4,
+      })
+    : null;
 
   const bounds = new googleMaps.maps.LatLngBounds();
   bounds.extend(tracking.kitchen);
   bounds.extend(tracking.customer);
-  bounds.extend(tracking.driver);
+  if (tracking.showDriver) bounds.extend(tracking.driver);
   map.fitBounds(bounds, 48);
 
   return { map, kitchenMarker, customerMarker, driverMarker, routeLine };
@@ -122,7 +129,7 @@ export function createWebMap(
 
 export function updateWebMap(handles: WebMapHandles, tracking: DeliveryTrackingSnapshot): void {
   handles.kitchenMarker.setPosition(tracking.kitchen);
-  if (!tracking.showDriver) {
+  if (!tracking.showRoute && !tracking.showDriver) {
     handles.map.setCenter(tracking.kitchen);
     handles.map.setZoom(15);
     handles.driverMarker?.setMap(null);
@@ -130,6 +137,11 @@ export function updateWebMap(handles: WebMapHandles, tracking: DeliveryTrackingS
     handles.routeLine?.setMap(null);
     return;
   }
-  handles.driverMarker?.setPosition(tracking.driver);
-  handles.routeLine?.setPath(tracking.route);
+  handles.customerMarker?.setPosition(tracking.customer);
+  if (tracking.showDriver) {
+    handles.driverMarker?.setPosition(tracking.driver);
+  }
+  if (tracking.showRoute) {
+    handles.routeLine?.setPath(tracking.route);
+  }
 }
