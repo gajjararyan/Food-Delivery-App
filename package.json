@@ -10,6 +10,7 @@
     "api:dev": "tsx backend/src/index.ts",
     "api:watch": "tsx watch backend/src/index.ts",
     "test:stack": "node scripts/check-test-stack.mjs",
+    "eas:preview:android": "eas build -p android --profile preview",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
     "typecheck": "tsc --noEmit",

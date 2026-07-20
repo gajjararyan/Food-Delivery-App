@@ -1,25 +1,23 @@
 # Deploy on Render: New → Blueprint → connect this repo
-# Or: New Web Service → Root Directory = backend
+# Do NOT set Root Directory to `backend` — the API imports ../lib from the monorepo root.
+# Leave Root Directory empty and use the commands below.
 services:
   - type: web
     name: gharkaswad-api
     runtime: node
-    rootDir: backend
     plan: free
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: npm install --prefix backend
+    startCommand: npx --prefix backend tsx backend/src/index.ts
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
         value: "22"
-      - key: PORT
-        value: "3001"
-      # Set these in the Render dashboard (Do not commit secrets):
+      # Do NOT hardcode PORT — Render injects it. App already uses process.env.PORT.
+      # Set these secrets in the Render dashboard (never commit them):
       # EXPO_PUBLIC_SUPABASE_URL
       # EXPO_PUBLIC_SUPABASE_ANON_KEY
       # SUPABASE_SERVICE_ROLE_KEY
       # EXPO_PUBLIC_RAZORPAY_KEY_ID
       # RAZORPAY_KEY_SECRET
-      # ALLOW_SANDBOX_CONFIRM=true  (pilot)
       - key: ALLOW_SANDBOX_CONFIRM
         value: "true"
