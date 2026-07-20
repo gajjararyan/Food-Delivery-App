@@ -1,13 +1,13 @@
 # Deploy on Render: New → Blueprint → connect this repo
-# Do NOT set Root Directory to `backend` — the API imports ../lib from the monorepo root.
-# Leave Root Directory empty and use the commands below.
+# Or: New Web Service with Root Directory = backend
 services:
   - type: web
     name: gharkaswad-api
     runtime: node
+    rootDir: backend
     plan: free
-    buildCommand: npm install --prefix backend
-    startCommand: npx --prefix backend tsx backend/src/index.ts
+    buildCommand: npm install --include=dev
+    startCommand: npx tsx src/index.ts
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
