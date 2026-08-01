@@ -208,11 +208,7 @@ app.post('/payments/create-order', async (req, res) => {
     }
     // Amount changed since last Razorpay order — fall through to create a new one.
   }
-  console.log("========== ORDER ==========");
-  console.log("Order ID:", order.id);
-  console.log("Snapshot Type:", typeof order.thali_snapshot);
-  console.log("Snapshot:", JSON.stringify(order.thali_snapshot, null, 2));
-  console.log("========== END ORDER ==========");
+
   const verified = computeVerifiedOrderAmounts(order as Order);
   if (!verified) {
     res.status(400).json({ message: 'Order snapshot is invalid; cannot price payment' });
