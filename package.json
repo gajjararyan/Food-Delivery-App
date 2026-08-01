@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
+    "start": "node init && expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
@@ -21,15 +21,20 @@
     "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-firebase/analytics": "^26.0.0",
+    "@react-native-firebase/app": "^26.0.0",
+    "@sentry/react-native": "^8.21.0",
     "@supabase/supabase-js": "^2.110.1",
     "@tanstack/react-query": "^5.101.2",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "expo": "~57.0.4",
     "expo-constants": "^57.0.3",
+    "expo-dev-client": "^57.0.10",
     "expo-font": "^57.0.0",
     "expo-linking": "^57.0.2",
     "expo-location": "~57.0.2",
+    "expo-notifications": "~57.0.8",
     "expo-router": "^57.0.4",
     "expo-status-bar": "~57.0.0",
     "express": "^5.2.1",
@@ -41,6 +46,7 @@
     "react-native": "0.86.0",
     "react-native-gesture-handler": "^3.0.2",
     "react-native-maps": "1.27.2",
+    "react-native-razorpay": "^3.0.0",
     "react-native-reanimated": "^4.5.1",
     "react-native-safe-area-context": "^5.8.0",
     "react-native-screens": "^4.25.2",
@@ -68,6 +74,7 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
+    "maxWorkers": 2,
     "setupFiles": [
       "<rootDir>/jest.setup.js"
     ],
@@ -81,6 +88,9 @@
       "ts",
       "tsx",
       "js"
+    ],
+    "transformIgnorePatterns": [
+      "node_modules/(?!(react-native|@react-native|expo|@expo)/)"
     ]
   }
 }

@@ -40,7 +40,7 @@ const DEFAULT_ADMIN_PHONES = [ADMIN_TEST_PHONE_E164];
 export function getAdminPhones(): string[] {
   const fromEnv = (process.env.EXPO_PUBLIC_ADMIN_PHONES ?? '')
     .split(',')
-    .map((p) => p.trim())
+    .map((p: string) => p.trim())
     .filter(Boolean);
   if (fromEnv.length > 0) return fromEnv;
   return DEFAULT_ADMIN_PHONES;

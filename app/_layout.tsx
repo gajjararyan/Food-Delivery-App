@@ -21,9 +21,21 @@ import { CartProvider } from '../hooks/useCart';
 import { colors } from '../constants/theme';
 import { webRootStyle, webScreenStyle } from '../constants/webLayout';
 import { initSentry } from '../lib/sentry';
-import { trackEvent } from '../lib/analytics';
+import { trackEvent, wireAnalytics } from '../lib/analytics';
 
 initSentry();
+
+// Wire Firebase Analytics — soft: no-ops in Expo Go, works in dev-client / production builds
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { default: analytics } = require('@react-native-firebase/analytics');
+  wireAnalytics((name, params) => {
+    analytics().logEvent(name, params ?? {});
+  });
+} catch {
+  // Firebase native module not available (Expo Go) — analytics logs to console only
+}
+
 trackEvent('app_open');
 
 export default function RootLayout() {

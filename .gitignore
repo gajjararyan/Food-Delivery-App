@@ -31,8 +31,6 @@ yarn-error.*
 *.pem
 
 # env & secrets
-.env
-.env.*
 !.env.example
 .cursor/mcp.json
 
@@ -49,3 +47,4 @@ yarn-error.*
 # tooling
 coverage/
 .claude/
+config.bat

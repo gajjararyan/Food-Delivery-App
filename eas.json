@@ -12,6 +12,7 @@
       }
     },
     "preview": {
+      "developmentClient": true,
       "distribution": "internal",
       "android": {
         "buildType": "apk"
@@ -21,8 +22,6 @@
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpcnBrdHBoZGtwZGhkdmx3aXd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2NTAyMDcsImV4cCI6MjA5OTIyNjIwN30.HMEGWJHlz1tifr1B6EdTtGIg7eIxQCMOQ0m049kdvcA",
         "EXPO_PUBLIC_API_URL": "https://food-delivery-app-okm8.onrender.com",
         "EXPO_PUBLIC_RAZORPAY_KEY_ID": "rzp_test_TDGSa1MhDAAFCf",
-        "EXPO_PUBLIC_DEV_AUTH": "true",
-        "EXPO_PUBLIC_DEV_OTP": "654321",
         "EXPO_PUBLIC_ADMIN_PHONES": "+911234567890",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyDUMMY_PILOT_REPLACE_WITH_REAL_KEY"
       }

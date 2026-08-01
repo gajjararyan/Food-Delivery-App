@@ -13,34 +13,20 @@ export function initSentry(): void {
 
   // Soft import path: native Sentry package is optional until EAS build configures it.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- optional peer
-    const Sentry = require('sentry-expo') as {
-      init: (opts: { dsn: string; enableInExpoDevelopment?: boolean }) => void;
-      Native?: {
-        captureException?: (error: unknown) => void;
-        addBreadcrumb?: (data: {
-          category: string;
-          message: string;
-          level?: string;
-          data?: Record<string, unknown>;
-        }) => void;
-      };
-      captureException?: (error: unknown) => void;
-      addBreadcrumb?: (data: {
-        category: string;
-        message: string;
-        level?: string;
-        data?: Record<string, unknown>;
-      }) => void;
-    };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Sentry = require('@sentry/react-native');
 
-    Sentry.init({ dsn, enableInExpoDevelopment: true });
+    Sentry.init({ 
+      dsn, 
+      enabled: !__DEV__, // Usually Sentry is disabled in local dev to avoid noise
+      tracesSampleRate: 1.0,
+    });
     wireSentryHooks({
       captureException: (error) => {
-        Sentry.Native?.captureException?.(error) ?? Sentry.captureException?.(error);
+        Sentry.captureException(error);
       },
       addBreadcrumb: (data) => {
-        Sentry.Native?.addBreadcrumb?.(data) ?? Sentry.addBreadcrumb?.(data);
+        Sentry.addBreadcrumb(data);
       },
     });
     logger.info('Sentry initialized');

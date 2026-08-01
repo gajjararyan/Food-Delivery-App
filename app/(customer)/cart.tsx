@@ -277,11 +277,11 @@ export default function CartScreen() {
                     label: picked.label,
                     hint: picked.hint,
                   }),
-                  hint: picked.hint,
+                  hint: picked.hint ?? undefined,
                   lat: picked.lat,
                   lng: picked.lng,
                   distanceKm: travel?.km ?? 0,
-                  savedAddressId: picked.savedAddressId,
+                  savedAddressId: picked.savedAddressId ?? undefined,
                 });
               }}
             />
